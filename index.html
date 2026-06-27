@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>64Base Studio - Advanced Base64 Image Encoder & Decoder</title>
+  <meta name="description" content="An advanced image utility to convert, compress, and decode photos to Base64 code. Featuring color palette extraction, batch mode, and image resizing.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- JSZip for Batch ZIP download -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+  <!-- Ambient background glow elements -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+  
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo-container">
+          <i data-lucide="binary" class="logo-icon"></i>
+        </div>
+        <div class="brand-text">
+          <h1>64Base Studio</h1>
+          <p>Advanced Base64 Image Processor</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="toggle-history-btn" class="btn btn-secondary">
+          <i data-lucide="history"></i>
+          <span>History</span>
+          <span id="history-badge" class="badge">0</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="app-tabs">
+      <button class="tab-btn active" data-tab="single-encoder">
+        <i data-lucide="image"></i>
+        <span>Single Converter</span>
+      </button>
+      <button class="tab-btn" data-tab="batch-encoder">
+        <i data-lucide="layers"></i>
+        <span>Batch Converter</span>
+      </button>
+      <button class="tab-btn" data-tab="decoder">
+        <i data-lucide="code-2"></i>
+        <span>Base64 Decoder</span>
+      </button>
+    </nav>
+
+    <!-- App Content Area -->
+    <main class="app-main">
+      
+      <!-- ================= SINGLE ENCODER VIEW ================= -->
+      <section id="single-encoder-view" class="tab-content active">
+        <div class="workspace-grid">
+          
+          <!-- Left Panel: Input & Control -->
+          <div class="workspace-panel input-panel">
+            <div class="panel-header">
+              <h2><i data-lucide="upload-cloud"></i> Upload Image</h2>
+            </div>
+            
+            <div class="panel-body">
+              <!-- Dropzone -->
+              <div id="encoder-dropzone" class="dropzone">
+                <input type="file" id="encoder-file-input" accept="image/*" class="file-input">
+                <div class="dropzone-content">
+                  <div class="dropzone-icon">
+                    <i data-lucide="image-plus"></i>
+                  </div>
+                  <p class="dropzone-text">Drag & drop your image here, or <span>browse</span></p>
+                  <p class="dropzone-subtext">Supports PNG, JPEG, WebP, SVG, GIF (Max 10MB)</p>
+                  <p class="dropzone-subtext-paste"><i data-lucide="clipboard" class="inline-icon"></i> Or paste image directly (Ctrl+V)</p>
+                </div>
+              </div>
+
+              <!-- Preview & Configuration (hidden initially, shown when image loaded) -->
+              <div id="encoder-workspace" class="workspace-edit hidden">
+                <div class="image-preview-wrapper">
+                  <img id="encoder-image-preview" src="" alt="Source preview">
+                  <div class="image-overlay-dimensions">
+                    <span id="img-dim-badge">0 × 0</span>
+                  </div>
+                </div>
+
+                <!-- Transformation Tools -->
+                <div class="control-group transform-tools">
+                  <button id="btn-rotate-left" class="btn btn-icon btn-sm" title="Rotate Left 90°">
+                    <i data-lucide="rotate-ccw"></i>
+                  </button>
+                  <button id="btn-rotate-right" class="btn btn-icon btn-sm" title="Rotate Right 90°">
+                    <i data-lucide="rotate-cw"></i>
+                  </button>
+                  <button id="btn-flip-h" class="btn btn-icon btn-sm" title="Flip Horizontal">
+                    <i data-lucide="flip-horizontal"></i>
+                  </button>
+                  <button id="btn-flip-v" class="btn btn-icon btn-sm" title="Flip Vertical">
+                    <i data-lucide="flip-vertical"></i>
+                  </button>
+                  <button id="btn-reset-transform" class="btn btn-danger btn-sm ml-auto">
+                    <i data-lucide="refresh-cw"></i> Reset
+                  </button>
+                </div>
+
+                <!-- Optimization Settings -->
+                <div class="settings-card">
+                  <h3><i data-lucide="sliders"></i> Optimization Options</h3>
+                  
+                  <!-- Output Format -->
+                  <div class="setting-row">
+                    <label for="select-format">Convert Format</label>
+                    <select id="select-format" class="custom-select">
+                      <option value="original">Keep Original</option>
+                      <option value="image/jpeg">JPEG (Compressed)</option>
+                      <option value="image/png">PNG (Lossless)</option>
+                      <option value="image/webp">WebP (Modern)</option>
+                    </select>
+                  </div>
+
+                  <!-- Quality Slider (shown for JPEG/WebP) -->
+                  <div id="quality-setting" class="setting-row">
+                    <div class="slider-header">
+                      <label for="range-quality">Compression Quality</label>
+                      <span id="quality-val">80%</span>
+                    </div>
+                    <input type="range" id="range-quality" min="1" max="100" value="80" class="custom-range">
+                  </div>
+
+                  <!-- Resize Options -->
+                  <div class="setting-row resize-settings">
+                    <div class="resize-title">
+                      <label>Resize Dimensions</label>
+                      <button id="btn-lock-aspect" class="btn-lock active" title="Lock Aspect Ratio">
+                        <i data-lucide="link"></i>
+                      </button>
+                    </div>
+                    <div class="resize-inputs">
+                      <div class="input-with-label">
+                        <input type="number" id="input-width" min="1" placeholder="W">
+                        <span>Width (px)</span>
+                      </div>
+                      <span class="x-divider">×</span>
+                      <div class="input-with-label">
+                        <input type="number" id="input-height" min="1" placeholder="H">
+                        <span>Height (px)</span>
+                      </div>
+                    </div>
+                    <div class="resize-presets">
+                      <button class="preset-btn" data-scale="1">100%</button>
+                      <button class="preset-btn" data-scale="0.75">75%</button>
+                      <button class="preset-btn" data-scale="0.5">50%</button>
+                      <button class="preset-btn" data-scale="0.25">25%</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Color Palette Extractor -->
+                <div class="settings-card color-palette-card">
+                  <h3><i data-lucide="palette"></i> Dominant Color Palette</h3>
+                  <div id="palette-colors" class="palette-colors">
+                    <!-- Dynamic colors will appear here -->
+                    <p class="palette-placeholder">Upload an image to extract colors...</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Panel: Outputs -->
+          <div class="workspace-panel output-panel">
+            <div class="panel-header">
+              <h2><i data-lucide="file-code"></i> Generated Output</h2>
+              <div class="file-size-tracker">
+                <span id="label-orig-size" class="size-original">0 KB</span>
+                <i data-lucide="arrow-right" class="size-arrow"></i>
+                <span id="label-base64-size" class="size-base64">0 KB</span>
+                <span id="savings-badge" class="badge badge-success hidden">-0%</span>
+              </div>
+            </div>
+
+            <div class="panel-body">
+              <div id="output-tab-container" class="output-tabs">
+                <button class="output-tab active" data-format="uri">Data URI</button>
+                <button class="output-tab" data-format="raw">Raw String</button>
+                <button class="output-tab" data-format="html">HTML Img</button>
+                <button class="output-tab" data-format="css">CSS URL</button>
+                <button class="output-tab" data-format="markdown">Markdown</button>
+                <button class="output-tab" data-format="json">JSON</button>
+              </div>
+
+              <div class="code-viewer-container">
+                <textarea id="base64-output-textarea" readonly placeholder="Output code will appear here after uploading..."></textarea>
+                <div class="textarea-actions">
+                  <button id="btn-copy-output" class="btn btn-primary" disabled>
+                    <i data-lucide="copy"></i> Copy Code
+                  </button>
+                  <button id="btn-download-output" class="btn btn-secondary" disabled>
+                    <i data-lucide="download"></i> Download Output
+                  </button>
+                </div>
+              </div>
+
+              <!-- Metadata Panel -->
+              <div class="settings-card metadata-card">
+                <h3><i data-lucide="info"></i> Image Information</h3>
+                <div class="metadata-grid">
+                  <div class="meta-item">
+                    <span class="meta-label">File Name:</span>
+                    <span id="meta-filename" class="meta-value">-</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Format:</span>
+                    <span id="meta-mime" class="meta-value">-</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Dimensions:</span>
+                    <span id="meta-dimensions" class="meta-value">-</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Aspect Ratio:</span>
+                    <span id="meta-ratio" class="meta-value">-</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= BATCH ENCODER VIEW ================= -->
+      <section id="batch-encoder-view" class="tab-content">
+        <div class="batch-workspace">
+          <div class="workspace-panel full-width-panel">
+            <div class="panel-header">
+              <h2><i data-lucide="layers"></i> Batch Image Converter</h2>
+              <div class="batch-actions-header hidden" id="batch-global-actions">
+                <button id="btn-batch-clear" class="btn btn-danger btn-sm">
+                  <i data-lucide="trash-2"></i> Clear All
+                </button>
+                <button id="btn-batch-copy-json" class="btn btn-secondary btn-sm">
+                  <i data-lucide="copy"></i> Copy All as JSON
+                </button>
+                <button id="btn-batch-download-zip" class="btn btn-primary btn-sm">
+                  <i data-lucide="file-archive"></i> Download All (.ZIP)
+                </button>
+              </div>
+            </div>
+            
+            <div class="panel-body">
+              <!-- Batch Dropzone -->
+              <div id="batch-dropzone" class="dropzone">
+                <input type="file" id="batch-file-input" accept="image/*" multiple class="file-input">
+                <div class="dropzone-content">
+                  <div class="dropzone-icon">
+                    <i data-lucide="images"></i>
+                  </div>
+                  <p class="dropzone-text">Drag & drop multiple images here, or <span>browse</span></p>
+                  <p class="dropzone-subtext">You can upload up to 20 images at once</p>
+                </div>
+              </div>
+
+              <!-- Batch Queue List -->
+              <div id="batch-list-wrapper" class="batch-list-container hidden">
+                <div class="batch-list-header">
+                  <span>Image Preview</span>
+                  <span>Details</span>
+                  <span>Sizes (Orig → Base64)</span>
+                  <span>Quick Actions</span>
+                </div>
+                <div id="batch-items-queue" class="batch-items-queue">
+                  <!-- Dynamic items -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= DECODER VIEW ================= -->
+      <section id="decoder-view" class="tab-content">
+        <div class="workspace-grid">
+          
+          <!-- Left Panel: Base64 Input -->
+          <div class="workspace-panel input-panel">
+            <div class="panel-header">
+              <h2><i data-lucide="code-2"></i> Base64 / Data URI Input</h2>
+            </div>
+            
+            <div class="panel-body">
+              <p class="section-intro-text">Paste base64 code below to decode it back into an image file.</p>
+              
+              <div class="decoder-input-container">
+                <textarea id="decoder-input-textarea" placeholder="Paste your Base64 raw string or Data URI here... e.g. data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."></textarea>
+                
+                <div class="decoder-control-row">
+                  <button id="btn-clear-decoder" class="btn btn-secondary btn-sm">
+                    <i data-lucide="x"></i> Clear
+                  </button>
+                  <button id="btn-decode-run" class="btn btn-primary">
+                    <i data-lucide="check"></i> Decode Base64
+                  </button>
+                </div>
+              </div>
+              
+              <div class="decoder-helper-card">
+                <h4>Accepted Formats</h4>
+                <ul>
+                  <li>Data URL strings (e.g. `data:image/png;base64,iVBOR...`)</li>
+                  <li>Raw Base64 strings (e.g. `iVBORw0KGgoAAA...`) - <em>Autodetects type (JPEG/PNG/GIF/WebP)</em></li>
+                  <li>HTML code containing inline images</li>
+                  <li>CSS custom property or background property strings</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Panel: Image Output -->
+          <div class="workspace-panel output-panel">
+            <div class="panel-header">
+              <h2><i data-lucide="eye"></i> Decoded Image Result</h2>
+            </div>
+
+            <div class="panel-body flex-center">
+              <div id="decoder-result-empty" class="decoder-empty-state">
+                <div class="empty-state-icon">
+                  <i data-lucide="image-minus"></i>
+                </div>
+                <h3>No Decoded Image Yet</h3>
+                <p>Paste correct Base64 code in the left panel and click "Decode".</p>
+              </div>
+
+              <div id="decoder-result-workspace" class="decoder-workspace-preview hidden">
+                <div class="decoded-image-box">
+                  <img id="decoder-image-preview" src="" alt="Decoded preview">
+                </div>
+                
+                <div class="decoded-info-card">
+                  <h3>Decoded Image Info</h3>
+                  <div class="metadata-grid">
+                    <div class="meta-item">
+                      <span class="meta-label">Inferred Mime-Type:</span>
+                      <span id="dec-meta-mime" class="meta-value">-</span>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">Original Dimensions:</span>
+                      <span id="dec-meta-dimensions" class="meta-value">-</span>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">Estimated File Size:</span>
+                      <span id="dec-meta-size" class="meta-value">-</span>
+                    </div>
+                  </div>
+                  
+                  <div class="action-buttons-row">
+                    <button id="btn-download-decoded" class="btn btn-primary btn-block">
+                      <i data-lucide="download"></i> Download Decoded Image
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ================= HISTORY DRAWER ================= -->
+  <div id="history-drawer" class="history-drawer">
+    <div class="drawer-overlay" id="history-drawer-overlay"></div>
+    <div class="drawer-content">
+      <div class="drawer-header">
+        <h2><i data-lucide="history"></i> Conversion History</h2>
+        <button id="close-history-btn" class="btn-close-drawer">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="drawer-body">
+        <div class="history-actions-row">
+          <button id="btn-clear-history" class="btn btn-danger btn-sm w-full">
+            <i data-lucide="trash-2"></i> Clear History
+          </button>
+        </div>
+        <div id="history-items-list" class="history-items-list">
+          <!-- Dynamic history cards -->
+          <div class="history-empty">
+            <i data-lucide="clock"></i>
+            <p>No conversion history yet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
