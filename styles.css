@@ -1400,3 +1400,42 @@ body {
 .hidden {
   display: none !important;
 }
+
+/* Footer & Portfolio Link styling */
+.app-footer {
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+  width: 100%;
+}
+
+.footer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+@media (min-width: 640px) {
+  .footer-content {
+    flex-direction: row;
+  }
+}
+
+.portfolio-link a {
+  color: var(--text-main);
+  text-decoration: none;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: var(--transition-fast);
+}
+
+.portfolio-link a:hover {
+  text-decoration: underline;
+}
+
