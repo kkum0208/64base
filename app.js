@@ -34,6 +34,9 @@ document.addEventListener('DOMContentLoaded', () => {
     history: []
   };
 
+  // Memory Cache for full base64 strings in the current session
+  const sessionBase64Cache = {};
+
   // --- DOM SELECTORS ---
   const DOM = {
     // Tab switching
@@ -303,7 +306,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- DROPZONE SETUP HELPER ---
   function setupDropzone(dropzoneEl, inputEl, callback) {
-    // Click triggers file selector
+    // Click triggers file selector (input is display: none so no double trigger)
     dropzoneEl.addEventListener('click', () => inputEl.click());
     
     inputEl.addEventListener('change', (e) => {
@@ -344,7 +347,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toast.className = `toast toast-${type}`;
     
     let iconName = 'info';
-    if (type === 'success') iconName = 'check-circle';
+    if (type === 'success') iconName = 'check';
     if (type === 'error') iconName = 'alert-triangle';
 
     toast.innerHTML = `
@@ -411,7 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
         DOM.encoderWorkspace.classList.remove('hidden');
 
         processImage();
-        showToast('Image uploaded successfully', 'success');
+        showToast('Image loaded successfully', 'success');
       };
       img.onerror = () => {
         showToast('Error loading image object', 'error');
@@ -423,7 +426,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Clipboard paste handler
   function handleClipboardPaste(e) {
-    // Only paste inside the Encoder dropzone or if the encoder is open
     const isEncoderActive = document.querySelector('[data-tab="single-encoder"]').classList.contains('active');
     if (!isEncoderActive) return;
 
@@ -431,7 +433,6 @@ document.addEventListener('DOMContentLoaded', () => {
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         const file = items[i].getAsFile();
-        // Give it a placeholder name
         const customFile = new File([file], `pasted-image-${Date.now()}.png`, { type: file.type });
         handleSingleFile([customFile]);
         break;
@@ -449,7 +450,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function processImage() {
     if (!state.originalImage) return;
 
-    // SVG / Vector image handling (direct Base64 read if format is 'original' and format is SVG)
     const isSvg = state.currentFile.type === 'image/svg+xml';
     const isGif = state.currentFile.type === 'image/gif';
     
@@ -461,14 +461,13 @@ document.addEventListener('DOMContentLoaded', () => {
       DOM.encoderImagePreview.src = state.originalDataUrl;
       DOM.encoderImagePreview.style.transform = `rotate(${state.rotation}deg) scale(${state.flipH ? -1 : 1}, ${state.flipV ? -1 : 1})`;
       
-      // Setup metadata sizes
       const base64Len = state.originalDataUrl.length;
       DOM.labelBase64Size.textContent = formatBytes(base64Len);
       DOM.savingsBadge.classList.add('hidden');
       
       renderCodeOutput();
       extractColorsFromUrl(state.originalDataUrl);
-      addToHistory(state.currentFile.name, state.originalDataUrl, state.currentFile.type);
+      addToHistory(state.currentFile.name, state.originalDataUrl, state.currentFile.type, null);
       return;
     }
 
@@ -476,46 +475,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    // Calculate dimensions based on rotation
     const isRotated90 = state.rotation === 90 || state.rotation === 270;
     
-    // Canvas dimensions are matching the current resized settings
     canvas.width = state.width;
     canvas.height = state.height;
 
-    // Save context state
     ctx.save();
-    
-    // Move origin to canvas center
     ctx.translate(canvas.width / 2, canvas.height / 2);
-    
-    // Apply rotation
     ctx.rotate((state.rotation * Math.PI) / 180);
-    
-    // Apply flip
     ctx.scale(state.flipH ? -1 : 1, state.flipV ? -1 : 1);
     
-    // Draw the image centered
-    // If rotated 90 or 270, we swap drawing dimensions
     const drawW = isRotated90 ? canvas.height : canvas.width;
     const drawH = isRotated90 ? canvas.width : canvas.height;
     
     ctx.drawImage(state.originalImage, -drawW / 2, -drawH / 2, drawW, drawH);
-    
     ctx.restore();
 
-    // Determine target format
     let targetMime = state.currentFile.type;
     if (state.currentFormat !== 'original') {
       targetMime = state.currentFormat;
     }
 
-    // Get Base64 URL
     let dataUrl;
     if (targetMime === 'image/jpeg' || targetMime === 'image/webp') {
       dataUrl = canvas.toDataURL(targetMime, state.quality);
     } else {
-      // PNG (lossless)
       dataUrl = canvas.toDataURL('image/png');
       targetMime = 'image/png';
     }
@@ -523,24 +507,21 @@ document.addEventListener('DOMContentLoaded', () => {
     state.generatedBase64 = dataUrl;
     state.generatedMime = targetMime;
 
-    // Show preview (we use the transformed canvas url so they see exact dimensions and crop)
     DOM.encoderImagePreview.src = dataUrl;
-    DOM.encoderImagePreview.style.transform = 'none'; // reset preview transform since canvas already baked it in!
+    DOM.encoderImagePreview.style.transform = 'none';
     DOM.imgDimBadge.textContent = `${canvas.width} × ${canvas.height}`;
 
-    // Size tracking
     const base64Len = dataUrl.length;
     DOM.labelBase64Size.textContent = formatBytes(base64Len);
 
-    // Calculate compression efficiency
     const savings = 1 - (base64Len / state.currentFile.size);
     if (savings > 0 && state.currentFormat !== 'original') {
       DOM.savingsBadge.textContent = `-${Math.round(savings * 100)}% Size`;
       DOM.savingsBadge.className = 'badge badge-success';
       DOM.savingsBadge.classList.remove('hidden');
     } else if (savings < 0) {
-      DOM.savingsBadge.textContent = `+${Math.round(Math.abs(savings) * 100)}% overhead`;
-      DOM.savingsBadge.className = 'badge btn-danger';
+      DOM.savingsBadge.textContent = `+${Math.round(Math.abs(savings) * 100)}%`;
+      DOM.savingsBadge.className = 'badge';
       DOM.savingsBadge.classList.remove('hidden');
     } else {
       DOM.savingsBadge.classList.add('hidden');
@@ -548,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderCodeOutput();
     extractColorsFromCanvas(canvas);
-    addToHistory(state.currentFile.name, dataUrl, targetMime);
+    addToHistory(state.currentFile.name, dataUrl, targetMime, canvas);
   }
 
   // --- OUTPUT RENDERER ---
@@ -585,8 +566,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     DOM.base64OutputTextarea.value = output;
-
-    // Enable buttons
     DOM.btnCopyOutput.disabled = false;
     DOM.btnDownloadOutput.disabled = false;
   }
@@ -601,7 +580,6 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast('Code copied to clipboard!', 'success');
       })
       .catch(() => {
-        // Fallback for older browsers
         DOM.base64OutputTextarea.select();
         document.execCommand('copy');
         showToast('Code copied to clipboard!', 'success');
@@ -640,9 +618,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- COLOR PALETTE EXTRACTOR ---
   function extractColorsFromCanvas(canvas) {
-    const ctx = canvas.getContext('2d');
-    
-    // For large images, sample smaller size to speed up color extraction
     const sampleWidth = Math.min(canvas.width, 100);
     const sampleHeight = Math.min(canvas.height, 100);
     
@@ -657,16 +632,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = imgData.data;
       const colorCounts = {};
 
-      // Analyze pixels with step to gather popularity
-      for (let i = 0; i < data.length; i += 16) { // step by 4 pixels (16 items in array: r,g,b,a * 4)
+      for (let i = 0; i < data.length; i += 16) {
         const r = data[i];
         const g = data[i+1];
         const b = data[i+2];
         const a = data[i+3];
 
-        if (a < 100) continue; // ignore highly transparent pixels
+        if (a < 100) continue;
 
-        // Round RGB values to reduce palette details and cluster similar colors
         const roundR = Math.round(r / 16) * 16;
         const roundG = Math.round(g / 16) * 16;
         const roundB = Math.round(b / 16) * 16;
@@ -675,20 +648,17 @@ document.addEventListener('DOMContentLoaded', () => {
         colorCounts[rgbKey] = (colorCounts[rgbKey] || 0) + 1;
       }
 
-      // Sort by frequency
       const sortedColors = Object.keys(colorCounts)
         .sort((a, b) => colorCounts[b] - colorCounts[a])
-        .slice(0, 5); // top 5 colors
+        .slice(0, 5);
 
       renderPalette(sortedColors);
     } catch (e) {
-      DOM.paletteColors.innerHTML = '<p class="palette-placeholder">Unable to extract colors due to cross-origin restriction.</p>';
+      DOM.paletteColors.innerHTML = '<p class="palette-placeholder">Unable to extract colors.</p>';
     }
   }
 
-  // Fallback color extraction for raw SVG
   function extractColorsFromUrl(url) {
-    // Simply draw raw image URL onto temp canvas to extract
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -724,7 +694,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       item.addEventListener('click', () => {
         navigator.clipboard.writeText(hex)
-          .then(() => showToast(`Copied color: ${hex}`, 'success'))
+          .then(() => showToast(`Copied: ${hex}`, 'success'))
           .catch(() => showToast(`Color: ${hex}`, 'info'));
       });
 
@@ -732,7 +702,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- HISTORY DRAWER SYSTEM ---
+  // --- HISTORY SYSTEM (NO MORE QUOTAEXCEEDED ERROR) ---
   function toggleHistoryDrawer() {
     DOM.historyDrawer.classList.toggle('active');
   }
@@ -752,16 +722,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function saveHistoryToStorage() {
     try {
-      localStorage.setItem('64base_history', JSON.stringify(state.history));
+      // Save metadata and thumbnails only (extremely light!)
+      const minifiedHistory = state.history.map(item => ({
+        id: item.id,
+        name: item.name,
+        thumbnail: item.thumbnail,
+        mimeType: item.mimeType,
+        size: item.size,
+        timestamp: item.timestamp
+      }));
+      localStorage.setItem('64base_history', JSON.stringify(minifiedHistory));
       updateHistoryBadge();
       renderHistoryList();
     } catch (e) {
-      console.warn('Storage limit reached, removing oldest history item');
-      // If full, trim history size
-      if (state.history.length > 5) {
-        state.history = state.history.slice(0, 5);
-        saveHistoryToStorage();
-      }
+      console.error('LocalStorage write error, cleaning up history', e);
+      state.history = [];
+      localStorage.removeItem('64base_history');
+      updateHistoryBadge();
+      renderHistoryList();
     }
   }
 
@@ -769,42 +747,61 @@ document.addEventListener('DOMContentLoaded', () => {
     DOM.historyBadge.textContent = state.history.length;
   }
 
-  function addToHistory(name, dataUrl, mimeType) {
+  function addToHistory(name, dataUrl, mimeType, canvasElement) {
+    let thumbnail = '';
+
+    if (canvasElement) {
+      // Create a super light low-res thumbnail synchronously
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = 40;
+      thumbCanvas.height = 40;
+      const thumbCtx = thumbCanvas.getContext('2d');
+      thumbCtx.drawImage(canvasElement, 0, 0, 40, 40);
+      thumbnail = thumbCanvas.toDataURL('image/jpeg', 0.35); // heavily compressed JPEG (~1KB)
+      saveHistoryItem(name, dataUrl, mimeType, thumbnail);
+    } else {
+      // SVG/GIF asynchronous creation
+      const img = new Image();
+      img.onload = () => {
+        const thumbCanvas = document.createElement('canvas');
+        thumbCanvas.width = 40;
+        thumbCanvas.height = 40;
+        const thumbCtx = thumbCanvas.getContext('2d');
+        thumbCtx.drawImage(img, 0, 0, 40, 40);
+        thumbnail = thumbCanvas.toDataURL('image/jpeg', 0.35);
+        saveHistoryItem(name, dataUrl, mimeType, thumbnail);
+      };
+      img.onerror = () => {
+        saveHistoryItem(name, dataUrl, mimeType, '');
+      };
+      img.src = dataUrl;
+    }
+  }
+
+  function saveHistoryItem(name, dataUrl, mimeType, thumbnail) {
     // Check if duplicate of recent item (first in history list)
-    if (state.history.length > 0 && state.history[0].dataUrl === dataUrl) {
-      return; // avoid redundant saving
+    if (state.history.length > 0 && sessionBase64Cache[state.history[0].id] === dataUrl) {
+      return; 
     }
 
-    // Limit base64 length stored to avoid easily exceeding localStorage 5MB limit
-    // We create a smaller thumbnail to represent in history, and only store full string if it's less than 1MB
-    const size = dataUrl.length;
-    let base64ToStore = dataUrl;
-    let isTruncated = false;
-
-    if (size > 1.5 * 1024 * 1024) { // over 1.5 MB in characters
-      // To prevent localStorage crashes, we save a truncated URL indicator
-      // The user can't download full base64 from history but can see the thumbnail
-      isTruncated = true;
-      base64ToStore = 'TRUNCATED_MAX_LIMIT';
-    }
+    const itemId = 'hist_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    // Cache full base64 string in memory only
+    sessionBase64Cache[itemId] = dataUrl;
 
     const historyItem = {
-      id: 'hist_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+      id: itemId,
       name: name,
-      thumbnail: createThumbnailDataUrl(dataUrl), // extract smaller preview
-      dataUrl: base64ToStore,
-      isTruncated: isTruncated,
+      thumbnail: thumbnail || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>',
       mimeType: mimeType,
-      size: size,
+      size: dataUrl.length,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    // Unshift to front
     state.history.unshift(historyItem);
 
-    // Max 10 items in history
     if (state.history.length > 10) {
-      state.history.pop();
+      const removed = state.history.pop();
+      delete sessionBase64Cache[removed.id];
     }
 
     saveHistoryToStorage();
@@ -817,7 +814,7 @@ document.addEventListener('DOMContentLoaded', () => {
       DOM.historyItemsList.innerHTML = `
         <div class="history-empty">
           <i data-lucide="clock"></i>
-          <p>No conversion history yet.</p>
+          <p>No conversion history.</p>
         </div>
       `;
       lucide.createIcons();
@@ -828,23 +825,25 @@ document.addEventListener('DOMContentLoaded', () => {
       const card = document.createElement('div');
       card.className = 'history-item-card';
       
-      const truncLabel = item.isTruncated ? ' <span style="color:var(--color-danger);font-size:0.7rem;">(Large)</span>' : '';
-      
+      const hasCachedData = !!sessionBase64Cache[item.id];
+      const copyDisabledAttr = hasCachedData ? '' : 'disabled';
+      const tooltipTitle = hasCachedData ? 'Copy Base64' : 'Cache cleared. Load file again.';
+
       card.innerHTML = `
         <div class="history-item-thumb">
           <img src="${item.thumbnail}" alt="thumb">
         </div>
         <div class="history-item-info">
-          <span class="history-item-name">${item.name}${truncLabel}</span>
+          <span class="history-item-name">${item.name}</span>
           <span class="history-item-size">${formatBytes(item.size)} • ${item.mimeType.split('/')[1].toUpperCase()}</span>
           <span class="history-item-time">${item.timestamp}</span>
         </div>
         <div class="history-item-actions">
-          <button class="btn btn-icon btn-secondary btn-sm btn-hist-copy" title="Copy Base64" ${item.isTruncated ? 'disabled' : ''}>
-            <i data-lucide="copy" style="width:14px;height:14px;"></i>
+          <button class="btn btn-icon btn-secondary btn-sm btn-hist-copy" ${copyDisabledAttr} title="${tooltipTitle}">
+            <i data-lucide="copy" style="width:12px;height:12px;"></i>
           </button>
           <button class="btn btn-icon btn-danger btn-sm btn-hist-delete" title="Delete">
-            <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+            <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
           </button>
         </div>
       `;
@@ -852,13 +851,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // Copy click handler
       card.querySelector('.btn-hist-copy').addEventListener('click', (e) => {
         e.stopPropagation();
-        if (item.isTruncated) {
-          showToast('File payload too large to fetch from history cache', 'error');
-          return;
+        const cachedData = sessionBase64Cache[item.id];
+        if (cachedData) {
+          navigator.clipboard.writeText(cachedData)
+            .then(() => showToast('Copied Base64 from cache!', 'success'))
+            .catch(() => showToast('Copy failed', 'error'));
+        } else {
+          showToast('Image cache expired. Re-upload file.', 'error');
         }
-        navigator.clipboard.writeText(item.dataUrl)
-          .then(() => showToast('Copied Base64 from history!', 'success'))
-          .catch(() => showToast('Copy failed', 'error'));
       });
 
       // Delete handler
@@ -867,22 +867,21 @@ document.addEventListener('DOMContentLoaded', () => {
         deleteHistoryItem(item.id);
       });
 
-      // Click card itself to reload into Encoder (if not truncated)
+      // Click card to reload
       card.addEventListener('click', () => {
-        if (item.isTruncated) {
-          showToast('This cached image size is too large to load back directly.', 'error');
-          return;
+        const cachedData = sessionBase64Cache[item.id];
+        if (cachedData) {
+          fetch(cachedData)
+            .then(res => res.blob())
+            .then(blob => {
+              const file = new File([blob], item.name, { type: item.mimeType });
+              handleSingleFile([file]);
+              toggleHistoryDrawer();
+            })
+            .catch(() => showToast('Failed to load image from cache', 'error'));
+        } else {
+          showToast('File cache cleared. Please re-upload your image.', 'info');
         }
-        
-        // Reconstruct File and load
-        fetch(item.dataUrl)
-          .then(res => res.blob())
-          .then(blob => {
-            const file = new File([blob], item.name, { type: item.mimeType });
-            handleSingleFile([file]);
-            toggleHistoryDrawer();
-          })
-          .catch(() => showToast('Failed to reconstruct image from history cache', 'error'));
       });
 
       DOM.historyItemsList.appendChild(card);
@@ -892,45 +891,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function deleteHistoryItem(id) {
     state.history = state.history.filter(item => item.id !== id);
+    delete sessionBase64Cache[id];
     saveHistoryToStorage();
-    showToast('Item deleted from history');
+    showToast('Item deleted');
   }
 
   function clearHistory() {
     if (confirm('Clear all conversion history?')) {
       state.history = [];
+      // Clear cache keys
+      for (const key in sessionBase64Cache) {
+        delete sessionBase64Cache[key];
+      }
       saveHistoryToStorage();
       showToast('History cleared');
     }
   }
 
-  // Create quick low-res base64 thumbnail for history view
-  function createThumbnailDataUrl(originalUrl) {
-    // If it's already an SVG, just return URL since it has no canvas width/height properties easily accessible
-    if (originalUrl.includes('image/svg+xml')) return originalUrl;
-
-    const img = new Image();
-    img.src = originalUrl;
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = 50;
-    canvas.height = 50;
-    const ctx = canvas.getContext('2d');
-    
-    // Draw scaled representation
-    ctx.drawImage(img, 0, 0, 50, 50);
-    return canvas.toDataURL('image/jpeg', 0.5);
-  }
-
   // --- BATCH CONVERTER SYSTEM ---
   function handleBatchFiles(files) {
     const filesArray = Array.from(files);
-    
     if (filesArray.length === 0) return;
     
     const imageFiles = filesArray.filter(f => f.type.startsWith('image/'));
     if (imageFiles.length === 0) {
-      showToast('No valid images dropped!', 'error');
+      showToast('No valid images uploaded!', 'error');
       return;
     }
 
@@ -939,7 +924,6 @@ document.addEventListener('DOMContentLoaded', () => {
     DOM.batchGlobalActions.classList.remove('hidden');
 
     imageFiles.forEach(file => {
-      // Create batch object
       const batchId = 'batch_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
       const batchItem = {
         id: batchId,
@@ -973,19 +957,18 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
       <div class="batch-item-sizes">
         <span class="batch-item-orig-size">Orig: ${formatBytes(item.originalSize)}</span>
-        <span class="batch-item-b64-size">Base64: Calculating...</span>
+        <span class="batch-item-b64-size">Base64: ...</span>
       </div>
       <div class="batch-item-actions">
         <button class="btn btn-icon btn-secondary btn-sm btn-batch-copy" disabled title="Copy Base64">
-          <i data-lucide="copy" style="width:14px;height:14px;"></i>
+          <i data-lucide="copy" style="width:12px;height:12px;"></i>
         </button>
         <button class="btn btn-icon btn-danger btn-sm btn-batch-delete" title="Delete">
-          <i data-lucide="x" style="width:14px;height:14px;"></i>
+          <i data-lucide="x" style="width:12px;height:12px;"></i>
         </button>
       </div>
     `;
 
-    // Delete item click
     row.querySelector('.btn-batch-delete').addEventListener('click', () => {
       removeBatchItem(item.id);
     });
@@ -1002,12 +985,10 @@ document.addEventListener('DOMContentLoaded', () => {
       item.base64 = dataUrl;
       item.base64Size = dataUrl.length;
 
-      // Extract dimensions
       const img = new Image();
       img.onload = () => {
         item.dimensions = `${img.naturalWidth} × ${img.naturalHeight} px`;
         
-        // Update UI
         const rowEl = document.getElementById(item.id);
         if (rowEl) {
           rowEl.querySelector('.batch-item-preview').innerHTML = `<img src="${dataUrl}" alt="thumb">`;
@@ -1046,7 +1027,7 @@ document.addEventListener('DOMContentLoaded', () => {
     DOM.batchGlobalActions.classList.add('hidden');
     DOM.batchDropzone.classList.remove('hidden');
     DOM.batchFileInput.value = '';
-    showToast('Batch queue cleared');
+    showToast('Queue cleared');
   }
 
   function copyBatchAsJson() {
@@ -1060,18 +1041,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
 
     navigator.clipboard.writeText(JSON.stringify(dataObj, null, 2))
-      .then(() => showToast('Batch JSON copied to clipboard!', 'success'))
+      .then(() => showToast('Batch JSON copied!', 'success'))
       .catch(() => showToast('Copy failed', 'error'));
   }
 
   function downloadBatchAsZip() {
     if (state.batchItems.length === 0) return;
     
-    showToast('Generating ZIP file...', 'info');
+    showToast('Generating ZIP...', 'info');
     const zip = new JSZip();
 
     state.batchItems.forEach(item => {
-      // Base64 has prefix header (data:image/png;base64,). We strip it to add correctly as data type
       const base64Data = item.base64.substring(item.base64.indexOf(',') + 1);
       zip.file(item.name, base64Data, { base64: true });
     });
@@ -1080,13 +1060,13 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(blob => {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `64base_batch_images_${Date.now()}.zip`;
+        link.download = `batch_images_${Date.now()}.zip`;
         link.click();
         URL.revokeObjectURL(link.href);
-        showToast('ZIP downloaded successfully!', 'success');
+        showToast('ZIP downloaded!', 'success');
       })
       .catch(err => {
-        showToast('Failed to create ZIP archive', 'error');
+        showToast('ZIP generation failed', 'error');
         console.error(err);
       });
   }
@@ -1102,8 +1082,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let mime = '';
     let base64Data = '';
 
-    // Handle inputs wrapped in HTML image elements or CSS url parameters
-    // Check for `<img src="...">` tag
     const imgRegex = /<img[^>]+src=["']([^"']+)["']/i;
     const cssRegex = /url\(["']?([^"'\)]+)["']?\)/i;
 
@@ -1118,7 +1096,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (input.startsWith('data:')) {
-      // Format is Data URI
       const colonIndex = input.indexOf(':');
       const semicolonIndex = input.indexOf(';');
       const commaIndex = input.indexOf(',');
@@ -1128,7 +1105,6 @@ document.addEventListener('DOMContentLoaded', () => {
         base64Data = input;
       }
     } else {
-      // Raw Base64 string - try to infer mime-type
       base64Data = input;
       const signature = input.substring(0, 10);
       
@@ -1143,26 +1119,22 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (signature.startsWith('PHN2') || signature.startsWith('PD94')) {
         mime = 'image/svg+xml';
       } else {
-        mime = 'image/png'; // default fallback
+        mime = 'image/png';
       }
 
-      // Prepend data uri header
       base64Data = `data:${mime};base64,${input}`;
     }
 
-    // Set preview source and verify it loads correctly
     const img = new Image();
     img.onload = () => {
       state.decodedBase64 = base64Data;
       state.decodedMime = mime;
       state.decodedImageSrc = base64Data;
 
-      // Render workspace
       DOM.decoderImagePreview.src = base64Data;
       DOM.decMetaMime.textContent = mime;
       DOM.decMetaDimensions.textContent = `${img.naturalWidth} × ${img.naturalHeight} px`;
       
-      // Approximate bytes from Base64 length (approx 0.75 ratio)
       const cleanLen = base64Data.substring(base64Data.indexOf(',') + 1).length;
       DOM.decMetaSize.textContent = formatBytes(Math.round(cleanLen * 0.75));
 
@@ -1172,7 +1144,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     img.onerror = () => {
-      showToast('Invalid Base64 string or unsupported image encoding!', 'error');
+      showToast('Invalid Base64 or unsupported image encoding!', 'error');
     };
 
     img.src = base64Data;
@@ -1189,7 +1161,7 @@ document.addEventListener('DOMContentLoaded', () => {
     link.href = state.decodedBase64;
     link.download = filename;
     link.click();
-    showToast(`Saved image as ${filename}`, 'success');
+    showToast(`Saved as ${filename}`, 'success');
   }
 
   // --- HELPERS ---
@@ -1207,6 +1179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${width / divisor}:${height / divisor}`;
   }
 
+  // Greatest common divisor
   function gcd(a, b) {
     return (b === 0) ? a : gcd(b, a % b);
   }
